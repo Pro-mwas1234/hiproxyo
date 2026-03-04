@@ -2,6 +2,18 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    // Handle CORS preflight requests
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "*",
+          "Access-Control-Max-Age": "86400",
+        },
+      });
+    }
+
     if (url.pathname === "/m3u8-proxy") {
       return handleM3U8Proxy(request, env);
     } else if (url.pathname === "/ts-proxy") {
@@ -13,18 +25,16 @@ export default {
 };
 
 const isOriginAllowed = (origin, env) => {
-  // If no origin is provided, allow it (common for some players/direct access)
   if (!origin) return true;
-
   const allowedOrigins = (env.ALLOWED_ORIGINS || "*").split(",").map(o => o.trim());
-  if (allowedOrigins.includes("*")) return true;
-  return allowedOrigins.includes(origin);
+  return allowedOrigins.includes("*") || allowedOrigins.includes(origin);
 };
 
 async function handleM3U8Proxy(request, env) {
   const { searchParams } = new URL(request.url);
   const targetUrl = searchParams.get("url");
-  const headers = JSON.parse(searchParams.get("headers") || "{}");
+  const headersParam = searchParams.get("headers");
+  const headers = JSON.parse(headersParam || "{}");
   const origin = request.headers.get("Origin") || "";
 
   if (!isOriginAllowed(origin, env)) {
@@ -47,32 +57,31 @@ async function handleM3U8Proxy(request, env) {
     const response = await fetch(targetUrl, { headers: finalHeaders });
     if (!response.ok) return new Response("Fetch failed", { status: response.status, headers: { "Access-Control-Allow-Origin": "*" } });
 
-    let m3u8 = await response.text();
-    const lines = m3u8.split("\n");
+    const m3u8 = await response.text();
+    const lines = m3u8.split(/\r?\n/);
     const newLines = [];
 
     const urlObj = new URL(request.url);
     const workerUrl = `${urlObj.protocol}//${urlObj.host}`;
 
-    // Check if this is a Master Playlist (contains stream info)
     const isMaster = m3u8.includes("#EXT-X-STREAM-INF");
 
     for (let line of lines) {
-      line = line.trim();
-      if (!line) continue;
+      const trimmedLine = line.trim();
+      if (!trimmedLine) {
+        newLines.push(line);
+        continue;
+      }
 
-      if (line.startsWith("#")) {
-        if (line.startsWith("#EXT-X-KEY:") || line.startsWith("#EXT-X-MEDIA:")) {
-          const uriMatch = line.match(/URI=["']?([^"']+)["']?/);
+      if (trimmedLine.startsWith("#")) {
+        if (trimmedLine.startsWith("#EXT-X-KEY:") || trimmedLine.startsWith("#EXT-X-MEDIA:")) {
+          const uriMatch = trimmedLine.match(/URI=["']?([^"']+)["']?/);
           if (uriMatch) {
             const originalUri = uriMatch[1];
             const absoluteUri = new URL(originalUri, targetUrl).href;
-
-            // EXT-X-MEDIA for audio/subs are often M3U8s, while KEYs are usually fragments
-            const isMediaPlaylist = line.includes("TYPE=AUDIO") || line.includes("TYPE=SUBTITLES") || originalUri.includes(".m3u8");
-            const proxyPath = isMediaPlaylist ? "/m3u8-proxy" : "/ts-proxy";
-
-            const newUrl = `${workerUrl}${proxyPath}?url=${encodeURIComponent(absoluteUri)}&headers=${encodeURIComponent(JSON.stringify(headers))}`;
+            const isPlaylist = trimmedLine.includes("TYPE=AUDIO") || trimmedLine.includes("TYPE=SUBTITLES") || originalUri.includes(".m3u8");
+            const proxyPath = isPlaylist ? "/m3u8-proxy" : "/ts-proxy";
+            const newUrl = `${workerUrl}${proxyPath}?url=${encodeURIComponent(absoluteUri)}${headersParam ? `&headers=${encodeURIComponent(headersParam)}` : ""}`;
             newLines.push(line.replace(originalUri, newUrl));
           } else {
             newLines.push(line);
@@ -81,12 +90,11 @@ async function handleM3U8Proxy(request, env) {
           newLines.push(line);
         }
       } else {
-        const absoluteUri = new URL(line, targetUrl).href;
-        // In Master Playlists, lines are variant playlists. In Media Playlists, they are segments.
-        const isM3U8 = line.includes(".m3u8") || isMaster;
+        const absoluteUri = new URL(trimmedLine, targetUrl).href;
+        const isM3U8 = trimmedLine.includes(".m3u8") || isMaster;
         const proxyPath = isM3U8 ? "/m3u8-proxy" : "/ts-proxy";
-
-        newLines.push(`${workerUrl}${proxyPath}?url=${encodeURIComponent(absoluteUri)}&headers=${encodeURIComponent(JSON.stringify(headers))}`);
+        const newUrl = `${workerUrl}${proxyPath}?url=${encodeURIComponent(absoluteUri)}${headersParam ? `&headers=${encodeURIComponent(headersParam)}` : ""}`;
+        newLines.push(newUrl);
       }
     }
 
@@ -139,10 +147,9 @@ async function handleTsProxy(request, env) {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Headers": "*",
       "Access-Control-Allow-Methods": "*",
-      "Cache-Control": "public, max-age=3600"
     });
 
-    const headersToForward = ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"];
+    const headersToForward = ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Cache-Control"];
     headersToForward.forEach(h => {
       if (response.headers.has(h)) responseHeaders.set(h, response.headers.get(h));
     });
