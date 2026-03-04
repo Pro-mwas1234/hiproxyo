@@ -19,11 +19,10 @@ Host your own instance of M3U8-Proxy on Render.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/JustAnimeCore/HiAnime-M3U8-Proxy)
 
-### Cloudflare-worker
- - Create an example starter worker in your cloudflare account
- - Edit the code of the worker after deploying it
- - Override the code of your starter worker with the code given in `m3u8proxy(cf_worker).js`
- - Deploy your worker
+### Cloudflare Worker
+- Install dependencies: `npm install`
+- Run locally: `npm run worker:dev`
+- Deploy to Cloudflare: `npm run worker:deploy`
 
 ## 🚀 How It Works
 
