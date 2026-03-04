@@ -12,28 +12,10 @@ export default {
   },
 };
 
-const options = {
-  originBlacklist: [],
-  originWhitelist: ["*"],
-};
-
-const isOriginAllowed = (origin, options) => {
-  if (options.originWhitelist.includes("*")) {
-    return true;
-  }
-  if (
-    options.originWhitelist.length &&
-    !options.originWhitelist.includes(origin)
-  ) {
-    return false;
-  }
-  if (
-    options.originBlacklist.length &&
-    options.originBlacklist.includes(origin)
-  ) {
-    return false;
-  }
-  return true;
+const isOriginAllowed = (origin, env) => {
+  const allowedOrigins = (env.ALLOWED_ORIGINS || "*").split(",").map(o => o.trim());
+  if (allowedOrigins.includes("*")) return true;
+  return allowedOrigins.includes(origin);
 };
 
 async function handleM3U8Proxy(request, env) {
@@ -44,7 +26,8 @@ async function handleM3U8Proxy(request, env) {
 
   const defaultHeaders = {
     "Referer": env.DEFAULT_REFERER || "https://megacloud.blog",
-    "Origin": env.DEFAULT_ORIGIN || "https://hianime.to"
+    "Origin": env.DEFAULT_ORIGIN || "https://hianime.to",
+    "User-Agent": request.headers.get("User-Agent") || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
   };
 
   const finalHeaders = {
@@ -52,11 +35,13 @@ async function handleM3U8Proxy(request, env) {
     ...headers
   };
 
-  if (!isOriginAllowed(origin, options)) {
+  if (!isOriginAllowed(origin, env)) {
     return new Response(`The origin "${origin}" is not allowed.`, {
       status: 403,
+      headers: { "Access-Control-Allow-Origin": "*" }
     });
   }
+
   if (!targetUrl) {
     return new Response("URL is required", { status: 400 });
   }
@@ -66,39 +51,41 @@ async function handleM3U8Proxy(request, env) {
     if (!response.ok) {
       return new Response("Failed to fetch the m3u8 file", {
         status: response.status,
+        headers: { "Access-Control-Allow-Origin": "*" }
       });
     }
 
     let m3u8 = await response.text();
-    m3u8 = m3u8
-      .split("\n")
-      .filter((line) => !line.startsWith("#EXT-X-MEDIA:TYPE=AUDIO"))
-      .join("\n");
-
     const lines = m3u8.split("\n");
     const newLines = [];
 
-    lines.forEach((line) => {
+    const urlObj = new URL(request.url);
+    const workerUrl = `${urlObj.protocol}//${urlObj.host}`;
+
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+
       if (line.startsWith("#")) {
-        if (line.startsWith("#EXT-X-KEY:")) {
-          const regex = /https?:\/\/[^\""\s]+/g;
-          const keyUrl = regex.exec(line)?.[0] ?? "";
-          const newUrl = `/ts-proxy?url=${encodeURIComponent(
-            keyUrl
-          )}&headers=${encodeURIComponent(JSON.stringify(finalHeaders))}`;
-          newLines.push(line.replace(keyUrl, newUrl));
+        if (line.startsWith("#EXT-X-KEY:") || line.startsWith("#EXT-X-MEDIA:")) {
+          const uriMatch = line.match(/URI=["']?([^"']+)["']?/);
+          if (uriMatch) {
+            const originalUri = uriMatch[1];
+            const absoluteUri = new URL(originalUri, targetUrl).href;
+            const proxyPath = line.includes("TYPE=AUDIO") || line.includes("TYPE=SUBTITLES") ? "/m3u8-proxy" : "/ts-proxy";
+            const newUrl = `${workerUrl}${proxyPath}?url=${encodeURIComponent(absoluteUri)}&headers=${encodeURIComponent(JSON.stringify(finalHeaders))}`;
+            newLines.push(line.replace(originalUri, newUrl));
+          } else {
+            newLines.push(line);
+          }
         } else {
           newLines.push(line);
         }
       } else {
-        const uri = new URL(line, targetUrl);
-        newLines.push(
-          `/ts-proxy?url=${encodeURIComponent(
-            uri.href
-          )}&headers=${encodeURIComponent(JSON.stringify(finalHeaders))}`
-        );
+        const absoluteUri = new URL(line, targetUrl).href;
+        newLines.push(`${workerUrl}/ts-proxy?url=${encodeURIComponent(absoluteUri)}&headers=${encodeURIComponent(JSON.stringify(finalHeaders))}`);
       }
-    });
+    }
 
     return new Response(newLines.join("\n"), {
       headers: {
@@ -109,7 +96,7 @@ async function handleM3U8Proxy(request, env) {
       },
     });
   } catch (error) {
-    return new Response(error.message, { status: 500 });
+    return new Response(error.message, { status: 500, headers: { "Access-Control-Allow-Origin": "*" } });
   }
 }
 
@@ -119,51 +106,64 @@ async function handleTsProxy(request, env) {
   const headers = JSON.parse(searchParams.get("headers") || "{}");
   const origin = request.headers.get("Origin") || "";
 
-  const defaultHeaders = {
-    "Referer": env.DEFAULT_REFERER || "https://megacloud.blog",
-    "Origin": env.DEFAULT_ORIGIN || "https://hianime.to"
-  };
-
-  const finalHeaders = {
-    ...defaultHeaders,
-    ...headers
-  };
-
-  if (!isOriginAllowed(origin, options)) {
+  if (!isOriginAllowed(origin, env)) {
     return new Response(`The origin "${origin}" is not allowed.`, {
       status: 403,
+      headers: { "Access-Control-Allow-Origin": "*" }
     });
   }
+
   if (!targetUrl) {
     return new Response("URL is required", { status: 400 });
+  }
+
+  const forwardHeaders = new Headers({
+    "User-Agent": request.headers.get("User-Agent") || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    ...headers
+  });
+
+  // Forward Range header if present
+  if (request.headers.has("Range")) {
+    forwardHeaders.set("Range", request.headers.get("Range"));
   }
 
   try {
     const response = await fetch(targetUrl, {
       method: request.method,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.132 Safari/537.36",
-        ...finalHeaders,
-      },
+      headers: forwardHeaders,
     });
 
-    if (!response.ok) {
-      return new Response("Failed to fetch segment", {
-        status: response.status,
-      });
+    const responseHeaders = new Headers({
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "*",
+      "Access-Control-Allow-Methods": "*",
+      "Cache-Control": "public, max-age=3600"
+    });
+
+    // Forward essential response headers
+    const headersToForward = [
+      "Content-Type",
+      "Content-Length",
+      "Content-Range",
+      "Accept-Ranges",
+    ];
+
+    headersToForward.forEach(header => {
+      if (response.headers.has(header)) {
+        responseHeaders.set(header, response.headers.get(header));
+      }
+    });
+
+    // Ensure a representative content-type if missing
+    if (!responseHeaders.has("Content-Type")) {
+      responseHeaders.set("Content-Type", "video/mp2t");
     }
 
     return new Response(response.body, {
       status: response.status,
-      headers: {
-        "Content-Type": "video/mp2t",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "*",
-        "Access-Control-Allow-Methods": "*",
-      },
+      headers: responseHeaders,
     });
   } catch (error) {
-    return new Response(error.message, { status: 500 });
+    return new Response(error.message, { status: 500, headers: { "Access-Control-Allow-Origin": "*" } });
   }
 }
