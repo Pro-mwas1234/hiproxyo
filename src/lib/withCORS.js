@@ -1,19 +1,21 @@
-export default function withCORS(headers, request) {
-  headers["access-control-allow-origin"] = "*";
-  const corsMaxAge = request.corsAnywhereRequestState.corsMaxAge;
-  if (request.method === "OPTIONS" && corsMaxAge) {
-    headers["access-control-max-age"] = corsMaxAge;
+export default function withCORS(req, res, next) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Origin, X-Requested-With"
+  );
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Max-Age", "86400");
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
   }
-  if (request.headers["access-control-request-method"]) {
-    headers["access-control-allow-methods"] =
-      request.headers["access-control-request-method"];
-    delete request.headers["access-control-request-method"];
-  }
-  if (request.headers["access-control-request-headers"]) {
-    headers["access-control-allow-headers"] =
-      request.headers["access-control-request-headers"];
-    delete request.headers["access-control-request-headers"];
-  }
-  headers["access-control-expose-headers"] = Object.keys(headers).join(",");
-  return headers;
+
+  next();
 }
