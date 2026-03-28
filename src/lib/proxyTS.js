@@ -1,59 +1,27 @@
-import https from "node:https";
-import http from "node:http";
+import axios from "axios";
 
-export async function proxyTs(url, headers, req, res) {
-  let forceHTTPS = false;
-
-  if (url.startsWith("https://")) {
-    forceHTTPS = true;
-  }
-
-  const uri = new URL(url);
-  const options = {
-    hostname: uri.hostname,
-    port: uri.port,
-    path: uri.pathname + uri.search,
-    method: req.method,
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.132 Safari/537.36",
-      ...headers,
-    },
-  };
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "*");
-  res.setHeader("Access-Control-Allow-Methods", "*");
-
+export default async function proxyTS(req, res, parsed, options, proxyServer) {
   try {
-    if (forceHTTPS) {
-      const proxy = https.request(options, (r) => {
-        r.headers["content-type"] = "video/mp2t";
-        res.writeHead(r.statusCode ?? 200, r.headers);
+    const target = `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search || ""}`;
 
-        r.pipe(res, {
-          end: true,
-        });
-      });
+    const response = await axios.get(target, {
+      responseType: "stream",
+      headers: {
+        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0",
+      },
+      maxRedirects: 5,
+    });
 
-      req.pipe(proxy, {
-        end: true,
-      });
-    } else {
-      const proxy = http.request(options, (r) => {
-        r.headers["content-type"] = "video/mp2t";
-        res.writeHead(r.statusCode ?? 200, r.headers);
+    res.writeHead(200, {
+      "Content-Type": "video/MP2T",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=31536000",
+    });
 
-        r.pipe(res, {
-          end: true,
-        });
-      });
-      req.pipe(proxy, {
-        end: true,
-      });
-    }
-  } catch (e) {
-    res.writeHead(500);
-    res.end(e.message);
-    return null;
+    response.data.pipe(res);
+  } catch (err) {
+    console.error("TS Proxy Error:", err.message);
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("Error fetching TS segment");
   }
 }
