@@ -1,6 +1,7 @@
 import getHandler from "./getHandler.js";
 import httpProxy from "http-proxy";
 import http from "node:http";
+import https from "node:https";
 
 export default function createServer(options) {
   options = options || {};
@@ -31,7 +32,7 @@ export default function createServer(options) {
       "Content-Type, Authorization"
     );
     res.setHeader("Access-Control-Allow-Credentials", "true");
-  
+
     if (req.method === "OPTIONS") {
       res.writeHead(204);
       res.end();
