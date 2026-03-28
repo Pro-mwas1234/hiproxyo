@@ -1,27 +1,19 @@
 {
   "version": 2,
-  "name": "m3u8proxy",
   "builds": [
     {
       "src": "src/index.js",
       "use": "@vercel/node"
-    },
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
     }
   ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
     {
       "src": "/(.*)",
       "dest": "/src/index.js"
     }
   ],
   "env": {
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "NODE_OPTIONS": "--no-warnings=DeprecationWarning"
   }
 }
