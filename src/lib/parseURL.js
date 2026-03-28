@@ -1,4 +1,4 @@
-// ✅ src/lib/parseURL.js - WHATWG URL API (no deprecation warning)
+// ✅ WHATWG URL API - No deprecation warnings
 
 export default function parseURL(req_url) {
   const match = req_url.match(
@@ -21,11 +21,10 @@ export default function parseURL(req_url) {
     const urlObj = new URL(req_url);
 
     // Return shape compatible with legacy url.parse() output
-    // so callers (createServer.js, proxyRequest.js, etc.) don't break
     return {
       href: urlObj.href,
       protocol: urlObj.protocol,
-      slashes: true, // http/https always have //
+      slashes: true,
       auth: urlObj.username || urlObj.password
         ? `${urlObj.username}${urlObj.password ? `:${urlObj.password}` : ""}`
         : null,
@@ -36,12 +35,11 @@ export default function parseURL(req_url) {
       port: urlObj.port,
       pathname: urlObj.pathname,
       search: urlObj.search,
-      query: urlObj.search ? urlObj.search.slice(1) : null, // legacy: string without '?'
+      query: urlObj.search ? urlObj.search.slice(1) : null,
       hash: urlObj.hash,
-      path: urlObj.pathname + urlObj.search, // convenience property
+      path: urlObj.pathname + urlObj.search,
     };
   } catch (e) {
-    // Invalid URL
     return null;
   }
 }
