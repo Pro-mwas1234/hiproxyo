@@ -1,9 +1,9 @@
-// ✅ api/proxy.js - Vercel Serverless Function
+// ✅ api/proxy.js
 import parseURL from "../src/lib/parseURL.js";
 import { isValidHostName } from "../src/lib/isValidHostName.js";
 
 export const config = {
-  runtime: "nodejs", // or "edge" for Edge Runtime
+  runtime: "nodejs",
 };
 
 export default async function handler(req, res) {
@@ -18,11 +18,11 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Get target URL from query param: /api/proxy?url=https://example.com/stream.m3u8
+  // Get target URL from query param
   const targetUrl = req.query?.url;
 
   if (!targetUrl) {
-    res.status(400).json({ error: "Missing 'url' query parameter" });
+    res.status(400).json({ error: "Missing 'url' query parameter. Example: /api/proxy?url=https://example.com/stream.m3u8" });
     return;
   }
 
@@ -33,7 +33,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Proxy using native fetch (no http-proxy needed!)
     const response = await fetch(parsed.href, {
       method: req.method,
       headers: {
@@ -46,7 +45,7 @@ export default async function handler(req, res) {
       redirect: "follow",
     });
 
-    // Forward response headers (exclude hop-by-hop headers)
+    // Forward headers
     const headers = {};
     for (const [key, value] of response.headers.entries()) {
       if (!["content-encoding", "content-length", "transfer-encoding", "connection"].includes(key.toLowerCase())) {
@@ -55,7 +54,7 @@ export default async function handler(req, res) {
     }
     headers["Access-Control-Allow-Origin"] = "*";
 
-    // Handle M3U8 content rewriting
+    // Handle M3U8 rewriting
     if (parsed.pathname.toLowerCase().endsWith(".m3u8")) {
       const text = await response.text();
       const baseUrl = `${parsed.protocol}//${parsed.host}`;
@@ -71,7 +70,7 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Stream other content types (TS, etc.)
+    // Stream other content
     res.setHeader("Content-Type", response.headers.get("content-type") || "application/octet-stream");
     
     if (response.body) {
