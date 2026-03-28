@@ -1,60 +1,87 @@
+// ✅ api/proxy.js - Vercel Serverless Function
 import parseURL from "../src/lib/parseURL.js";
 import { isValidHostName } from "../src/lib/isValidHostName.js";
 
 export const config = {
-  runtime: "edge", // or "nodejs"
+  runtime: "nodejs", // or "edge" for Edge Runtime
 };
 
-export default async function handler(req) {
-  const url = new URL(req.url);
-  const targetUrl = url.searchParams.get("url") || req.query?.url;
+export default async function handler(req, res) {
+  // CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Origin");
+
+  // Handle preflight
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+
+  // Get target URL from query param: /api/proxy?url=https://example.com/stream.m3u8
+  const targetUrl = req.query?.url;
 
   if (!targetUrl) {
-    return new Response(JSON.stringify({ error: "Missing URL parameter" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    res.status(400).json({ error: "Missing 'url' query parameter" });
+    return;
   }
 
   const parsed = parseURL(targetUrl);
   if (!parsed?.hostname || !isValidHostName(parsed.hostname)) {
-    return new Response(JSON.stringify({ error: "Invalid or blocked URL" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    res.status(400).json({ error: "Invalid or blocked URL" });
+    return;
   }
 
   try {
-    // Forward the request using native fetch
+    // Proxy using native fetch (no http-proxy needed!)
     const response = await fetch(parsed.href, {
       method: req.method,
       headers: {
-        ...Object.fromEntries(req.headers),
+        ...Object.fromEntries(Object.entries(req.headers).filter(
+          ([key]) => !["host", "connection", "content-length"].includes(key.toLowerCase())
+        )),
         host: parsed.hostname,
       },
       body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
       redirect: "follow",
     });
 
-    // Return proxied response
-    const headers = new Headers();
-    response.headers.forEach((value, key) => {
-      if (!["content-encoding", "content-length", "transfer-encoding"].includes(key.toLowerCase())) {
-        headers.set(key, value);
+    // Forward response headers (exclude hop-by-hop headers)
+    const headers = {};
+    for (const [key, value] of response.headers.entries()) {
+      if (!["content-encoding", "content-length", "transfer-encoding", "connection"].includes(key.toLowerCase())) {
+        headers[key] = value;
       }
-    });
-    headers.set("Access-Control-Allow-Origin", "*");
+    }
+    headers["Access-Control-Allow-Origin"] = "*";
 
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
+    // Handle M3U8 content rewriting
+    if (parsed.pathname.toLowerCase().endsWith(".m3u8")) {
+      const text = await response.text();
+      const baseUrl = `${parsed.protocol}//${parsed.host}`;
+      const rewritten = text.replace(
+        /(URI=|)(["']?)(https?:\/\/|)([^"'\s]+)(["']?)/g,
+        (match, prefix, q1, protocol, path, q2) => {
+          const fullPath = protocol ? protocol + path : new URL(path, baseUrl).href;
+          return `${prefix}${q1}/api/proxy?url=${encodeURIComponent(fullPath)}${q2}`;
+        }
+      );
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.status(response.status).send(rewritten);
+      return;
+    }
+
+    // Stream other content types (TS, etc.)
+    res.setHeader("Content-Type", response.headers.get("content-type") || "application/octet-stream");
+    
+    if (response.body) {
+      for await (const chunk of response.body) {
+        res.write(chunk);
+      }
+    }
+    res.status(response.status).end();
   } catch (err) {
     console.error("Proxy error:", err);
-    return new Response(JSON.stringify({ error: "Proxy failed" }), {
-      status: 502,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-    });
+    res.status(502).json({ error: "Proxy failed", details: err.message });
   }
 }
