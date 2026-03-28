@@ -1,14 +1,16 @@
 {
   "name": "m3u8proxy",
   "version": "1.0.0",
-  "description": "M3U8/TS Proxy Server",
+  "description": "M3U8/TS Proxy Server - Vercel Compatible",
   "type": "module",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node ./src/index.js",
-    "dev": "nodemon ./src/index.js",
+    "start": "node --no-warnings=DeprecationWarning ./src/index.js",
+    "dev": "nodemon --no-warnings=DeprecationWarning ./src/index.js",
     "worker:dev": "wrangler dev cf_worker.js",
     "worker:deploy": "wrangler deploy cf_worker.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "vercel-build": "echo 'Vercel build complete'"
   },
   "dependencies": {
     "axios": "^0.27.2",
@@ -29,9 +31,19 @@
     "wrangler": "^3.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "18.x"
   },
-  "keywords": [],
+  "keywords": [
+    "m3u8",
+    "proxy",
+    "hls",
+    "streaming",
+    "vercel"
+  ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Pro-mwas1234/hiproxyo.git"
+  }
 }
