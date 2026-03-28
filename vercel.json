@@ -2,18 +2,17 @@
   "version": 2,
   "builds": [
     {
-      "src": "src/index.js",
+      "src": "api/proxy.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
-      "dest": "/src/index.js"
+      "src": "/proxy/(.*)",
+      "dest": "/api/proxy.js"
     }
   ],
   "env": {
-    "NODE_ENV": "production",
-    "NODE_OPTIONS": "--no-warnings=DeprecationWarning"
+    "NODE_ENV": "production"
   }
 }
