@@ -1,56 +1,60 @@
-import httpProxy from "http-proxy";
 import parseURL from "../src/lib/parseURL.js";
 import { isValidHostName } from "../src/lib/isValidHostName.js";
 
 export const config = {
-  runtime: "nodejs",
+  runtime: "edge", // or "nodejs"
 };
 
-const proxy = httpProxy.createProxyServer({
-  xfwd: false,
-  secure: process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0",
-});
-
-export default async function handler(req, res) {
-  // CORS headers
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, DELETE, OPTIONS"
-  );
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, Origin"
-  );
-
-  if (req.method === "OPTIONS") {
-    res.status(204).end();
-    return;
-  }
-
-  // Get target URL from query or body
-  const targetUrl = req.query?.url || req.body?.url;
+export default async function handler(req) {
+  const url = new URL(req.url);
+  const targetUrl = url.searchParams.get("url") || req.query?.url;
 
   if (!targetUrl) {
-    res.status(400).json({ error: "Missing URL parameter" });
-    return;
+    return new Response(JSON.stringify({ error: "Missing URL parameter" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const parsed = parseURL(targetUrl);
-
-  if (!parsed || !parsed.hostname) {
-    res.status(400).json({ error: "Invalid URL" });
-    return;
+  if (!parsed?.hostname || !isValidHostName(parsed.hostname)) {
+    return new Response(JSON.stringify({ error: "Invalid or blocked URL" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  if (!isValidHostName(parsed.hostname)) {
-    res.status(403).json({ error: "Hostname not allowed" });
-    return;
-  }
+  try {
+    // Forward the request using native fetch
+    const response = await fetch(parsed.href, {
+      method: req.method,
+      headers: {
+        ...Object.fromEntries(req.headers),
+        host: parsed.hostname,
+      },
+      body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
+      redirect: "follow",
+    });
 
-  // Proxy the request
-  proxy.web(req, res, {
-    target: `${parsed.protocol}//${parsed.host}`,
-    changeOrigin: true,
-  });
+    // Return proxied response
+    const headers = new Headers();
+    response.headers.forEach((value, key) => {
+      if (!["content-encoding", "content-length", "transfer-encoding"].includes(key.toLowerCase())) {
+        headers.set(key, value);
+      }
+    });
+    headers.set("Access-Control-Allow-Origin", "*");
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  } catch (err) {
+    console.error("Proxy error:", err);
+    return new Response(JSON.stringify({ error: "Proxy failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    });
+  }
 }
