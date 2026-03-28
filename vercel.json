@@ -8,6 +8,14 @@
   ],
   "routes": [
     {
+      "src": "/api/proxy",
+      "dest": "/api/proxy.js"
+    },
+    {
+      "src": "/api/proxy/(.*)",
+      "dest": "/api/proxy.js"
+    },
+    {
       "src": "/proxy",
       "dest": "/api/proxy.js"
     },
@@ -17,6 +25,7 @@
     }
   ],
   "env": {
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "NODE_OPTIONS": "--no-warnings=DeprecationWarning"
   }
 }
